@@ -25,34 +25,34 @@ async function startScrapingProcess(config) {
     switch (platform) {
       case 'Google Search':
         if (currentUrl.includes('google.com/search')) {
-          businesses = await scrapeGoogleSearch();
+          businesses = await scrapeGoogleSearchWithProfiles();
         }
         break;
       case 'Google Maps':
         if (currentUrl.includes('google.com/maps') || currentUrl.includes('maps.google.com')) {
-          businesses = await scrapeGoogleMaps();
+          businesses = await scrapeGoogleMapsWithProfiles();
         }
         break;
       case 'Facebook':
         if (currentUrl.includes('facebook.com')) {
-          businesses = await scrapeFacebook();
+          businesses = await scrapeFacebookWithProfiles();
         }
         break;
       case 'LinkedIn':
         if (currentUrl.includes('linkedin.com')) {
-          businesses = await scrapeLinkedIn();
+          businesses = await scrapeLinkedInWithProfiles();
         }
         break;
       default:
         // Fallback detection
         if (currentUrl.includes('google.com/search')) {
-          businesses = await scrapeGoogleSearch();
+          businesses = await scrapeGoogleSearchWithProfiles();
         } else if (currentUrl.includes('google.com/maps') || currentUrl.includes('maps.google.com')) {
-          businesses = await scrapeGoogleMaps();
+          businesses = await scrapeGoogleMapsWithProfiles();
         } else if (currentUrl.includes('facebook.com')) {
-          businesses = await scrapeFacebook();
+          businesses = await scrapeFacebookWithProfiles();
         } else if (currentUrl.includes('linkedin.com')) {
-          businesses = await scrapeLinkedIn();
+          businesses = await scrapeLinkedInWithProfiles();
         }
     }
 
@@ -684,6 +684,402 @@ async function extractBusinessFromLinkedIn(element) {
 
   } catch (error) {
     console.error('Error extracting from LinkedIn element:', error);
+  }
+
+  return business;
+}
+
+// Enhanced scraping functions with profile navigation
+
+// Enhanced Google Search scraping with profile navigation
+async function scrapeGoogleSearchWithProfiles() {
+  const businesses = [];
+  console.log('Starting enhanced Google Search scraping with profile navigation');
+
+  // First, get basic business listings
+  const basicBusinesses = await scrapeGoogleSearch();
+
+  // Now navigate to each business profile for detailed information
+  for (const business of basicBusinesses) {
+    try {
+      const enhancedBusiness = await navigateToGoogleBusinessProfile(business);
+      businesses.push(enhancedBusiness);
+
+      // Wait between navigation to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 1500));
+    } catch (error) {
+      console.error('Error navigating to business profile:', error);
+      // If profile navigation fails, keep basic business info
+      businesses.push(business);
+    }
+  }
+
+  return businesses;
+}
+
+// Enhanced Google Maps scraping with profile navigation
+async function scrapeGoogleMapsWithProfiles() {
+  const businesses = [];
+  console.log('Starting enhanced Google Maps scraping with profile navigation');
+
+  try {
+    // Wait for Google Maps to load
+    await waitForElement('[role="main"]', 5000);
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
+    // Try different selectors for business listings
+    let businessElements = document.querySelectorAll('[role="article"] [data-value="name"]');
+
+    if (businessElements.length === 0) {
+      businessElements = document.querySelectorAll('div[data-result-index]');
+    }
+
+    if (businessElements.length === 0) {
+      businessElements = document.querySelectorAll('a[data-cid]');
+    }
+
+    if (businessElements.length === 0) {
+      businessElements = document.querySelectorAll('[jsaction*="click"] h3, [jsaction*="click"] div[aria-label]');
+    }
+
+    console.log(`Found ${businessElements.length} potential business elements`);
+
+    // Process each business element
+    for (let i = 0; i < Math.min(businessElements.length, 10); i++) {
+      const element = businessElements[i];
+      try {
+        // Click on the business to load its details
+        const clickTarget = element.closest('a') || element.closest('[role="button"]') || element;
+
+        console.log(`Clicking on business element ${i + 1}`);
+        clickTarget.click();
+
+        // Wait for business details to load
+        await new Promise(resolve => setTimeout(resolve, 4000));
+
+        // Extract detailed business information
+        const business = await extractDetailedMapsBusinessInfo();
+
+        if (business && business.name && business.name !== 'Results' && business.name.length > 1) {
+          console.log(`Extracted business: ${business.name}`);
+          businesses.push(business);
+        }
+
+        // Wait between businesses to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+      } catch (error) {
+        console.error(`Error processing business element ${i + 1}:`, error);
+      }
+    }
+
+    console.log(`Successfully extracted ${businesses.length} businesses from Google Maps`);
+    return businesses;
+
+  } catch (error) {
+    console.error('Error in enhanced Google Maps scraping:', error);
+    return [];
+  }
+}
+
+// Enhanced Facebook scraping with profile navigation
+async function scrapeFacebookWithProfiles() {
+  const businesses = [];
+  console.log('Starting enhanced Facebook scraping with profile navigation');
+
+  const basicBusinesses = await scrapeFacebook();
+
+  for (const business of basicBusinesses) {
+    try {
+      const enhancedBusiness = await navigateToFacebookBusinessProfile(business);
+      businesses.push(enhancedBusiness);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    } catch (error) {
+      console.error('Error navigating to Facebook business profile:', error);
+      businesses.push(business);
+    }
+  }
+
+  return businesses;
+}
+
+// Enhanced LinkedIn scraping with profile navigation
+async function scrapeLinkedInWithProfiles() {
+  const businesses = [];
+  console.log('Starting enhanced LinkedIn scraping with profile navigation');
+
+  const basicBusinesses = await scrapeLinkedIn();
+
+  for (const business of basicBusinesses) {
+    try {
+      const enhancedBusiness = await navigateToLinkedInBusinessProfile(business);
+      businesses.push(enhancedBusiness);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    } catch (error) {
+      console.error('Error navigating to LinkedIn business profile:', error);
+      businesses.push(business);
+    }
+  }
+
+  return businesses;
+}
+
+// Navigate to Google business profile and extract detailed info
+async function navigateToGoogleBusinessProfile(basicBusiness) {
+  try {
+    // Look for the business link in search results
+    const searchElements = document.querySelectorAll('[data-ved]');
+    let businessLink = null;
+
+    for (const element of searchElements) {
+      const nameElement = element.querySelector('h3, [role="heading"]');
+      if (nameElement && nameElement.textContent.includes(basicBusiness.name)) {
+        businessLink = element.querySelector('a[href*="google.com/maps"]') ||
+                      element.querySelector('a[href*="maps.google.com"]');
+        break;
+      }
+    }
+
+    if (businessLink) {
+      // Open in new tab and extract details
+      const newTab = window.open(businessLink.href, '_blank');
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // Extract details from the maps page (this would need cross-origin handling)
+      // For now, return enhanced basic info
+      return {
+        ...basicBusiness,
+        profileVisited: true,
+        mapsUrl: businessLink.href
+      };
+    }
+
+    return basicBusiness;
+  } catch (error) {
+    console.error('Error navigating to Google business profile:', error);
+    return basicBusiness;
+  }
+}
+
+// Navigate to Maps business profile and extract detailed contact info
+async function navigateToMapsBusinessProfile(element, basicBusiness) {
+  try {
+    // Click on the business listing to show details
+    const clickableElement = element.querySelector('[role="button"]') || element;
+    clickableElement.click();
+
+    // Wait for details panel to load
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Extract detailed information from the expanded view
+    const enhancedBusiness = { ...basicBusiness };
+
+    // Phone number
+    const phoneButton = document.querySelector('[data-item-id*="phone"] button, [aria-label*="phone" i]');
+    if (phoneButton) {
+      enhancedBusiness.phone = extractPhone(phoneButton.textContent || phoneButton.ariaLabel);
+    }
+
+    // Website
+    const websiteButton = document.querySelector('[data-item-id="authority"] a, [aria-label*="website" i]');
+    if (websiteButton) {
+      enhancedBusiness.website = websiteButton.href || websiteButton.textContent;
+    }
+
+    // Address
+    const addressButton = document.querySelector('[data-item-id="address"] button');
+    if (addressButton) {
+      enhancedBusiness.address = cleanText(addressButton.textContent);
+    }
+
+    // Hours
+    const hoursButton = document.querySelector('[data-item-id="oh"] button');
+    if (hoursButton) {
+      enhancedBusiness.hours = cleanText(hoursButton.textContent);
+    }
+
+    // Email (look in about section if available)
+    const aboutSection = document.querySelector('[data-section-id="ib"] div, [data-section-id="ad"] div');
+    if (aboutSection) {
+      const emailMatch = aboutSection.textContent.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+      if (emailMatch) {
+        enhancedBusiness.email = emailMatch[0];
+      }
+    }
+
+    // Additional services/amenities
+    const amenitiesSection = document.querySelector('[data-section-id="amenities"]');
+    if (amenitiesSection) {
+      enhancedBusiness.amenities = cleanText(amenitiesSection.textContent);
+    }
+
+    return enhancedBusiness;
+  } catch (error) {
+    console.error('Error extracting detailed Maps business info:', error);
+    return basicBusiness;
+  }
+}
+
+// Navigate to Facebook business profile for detailed info
+async function navigateToFacebookBusinessProfile(basicBusiness) {
+  try {
+    if (basicBusiness.website && basicBusiness.website.includes('facebook.com')) {
+      // If we have a Facebook URL, we could extract page info
+      // Look for contact information in about section
+      const aboutButton = document.querySelector('a[href*="/about"]');
+      if (aboutButton) {
+        aboutButton.click();
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Extract contact info from about page
+        const contactInfo = document.querySelector('[data-overviewsection="contact_info"], [data-overviewsection="contact"]');
+        if (contactInfo) {
+          const phoneMatch = contactInfo.textContent.match(/\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/);
+          if (phoneMatch) basicBusiness.phone = phoneMatch[0];
+
+          const emailMatch = contactInfo.textContent.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+          if (emailMatch) basicBusiness.email = emailMatch[0];
+
+          const websiteMatch = contactInfo.textContent.match(/https?:\/\/[^\s]+/);
+          if (websiteMatch) basicBusiness.website = websiteMatch[0];
+        }
+      }
+    }
+
+    return basicBusiness;
+  } catch (error) {
+    console.error('Error extracting Facebook business details:', error);
+    return basicBusiness;
+  }
+}
+
+// Navigate to LinkedIn business profile for detailed info
+async function navigateToLinkedInBusinessProfile(basicBusiness) {
+  try {
+    if (basicBusiness.website && basicBusiness.website.includes('linkedin.com')) {
+      // Click on the company link to view full profile
+      const companyLink = document.querySelector(`a[href*="${basicBusiness.website}"]`);
+      if (companyLink) {
+        companyLink.click();
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        // Extract contact and company details
+        const aboutSection = document.querySelector('.org-about-us__description, .company-about-us__description');
+        if (aboutSection) {
+          const emailMatch = aboutSection.textContent.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+          if (emailMatch) basicBusiness.email = emailMatch[0];
+        }
+
+        // Website
+        const websiteSection = document.querySelector('.org-about-company-module__website a');
+        if (websiteSection) {
+          basicBusiness.website = websiteSection.href;
+        }
+
+        // Industry and size
+        const industryElement = document.querySelector('.org-about-company-module__industry');
+        if (industryElement) {
+          basicBusiness.industry = cleanText(industryElement.textContent);
+        }
+
+        const sizeElement = document.querySelector('.org-about-company-module__company-size');
+        if (sizeElement) {
+          basicBusiness.companySize = cleanText(sizeElement.textContent);
+        }
+      }
+    }
+
+    return basicBusiness;
+  } catch (error) {
+    console.error('Error extracting LinkedIn business details:', error);
+    return basicBusiness;
+  }
+}
+
+// Extract detailed info from currently selected Maps business
+async function extractSelectedMapsBusinessDetails() {
+  const business = {};
+
+  try {
+    // Wait for business details to load
+    await waitForElement('[role="main"] h1', 3000);
+
+    // Business name
+    const nameElement = document.querySelector('[role="main"] h1');
+    if (nameElement) {
+      business.name = cleanText(nameElement.textContent);
+    }
+
+    // Rating and reviews
+    const ratingElement = document.querySelector('[role="img"][aria-label*="star"]');
+    if (ratingElement) {
+      business.rating = extractRating(ratingElement.ariaLabel);
+      business.reviewCount = extractReviewCount(ratingElement.ariaLabel);
+    }
+
+    // Category
+    const categoryElement = document.querySelector('[data-value="category"]') ||
+                           document.querySelector('button[data-value="category"]');
+    if (categoryElement) {
+      business.category = cleanText(categoryElement.textContent);
+    }
+
+    // Address
+    const addressElement = document.querySelector('[data-item-id="address"]') ||
+                          document.querySelector('button[data-item-id="address"]');
+    if (addressElement) {
+      business.address = cleanText(addressElement.textContent);
+    }
+
+    // Phone
+    const phoneElement = document.querySelector('[data-item-id*="phone"]') ||
+                        document.querySelector('button[data-item-id*="phone"]');
+    if (phoneElement) {
+      business.phone = extractPhone(phoneElement.textContent);
+    }
+
+    // Website
+    const websiteElement = document.querySelector('[data-item-id="authority"]') ||
+                          document.querySelector('a[data-item-id="authority"]');
+    if (websiteElement) {
+      business.website = websiteElement.href || websiteElement.textContent;
+    }
+
+    // Hours
+    const hoursElement = document.querySelector('[data-item-id="oh"]');
+    if (hoursElement) {
+      business.hours = cleanText(hoursElement.textContent);
+    }
+
+    // Email (search in about section or reviews)
+    const aboutSection = document.querySelector('[data-section-id="ib"], [data-section-id="ad"]');
+    if (aboutSection) {
+      const emailMatch = aboutSection.textContent.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+      if (emailMatch) {
+        business.email = emailMatch[0];
+      }
+    }
+
+    // Look for email in reviews or other sections
+    if (!business.email) {
+      const allText = document.body.textContent;
+      const emailMatches = allText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g);
+      if (emailMatches && emailMatches.length > 0) {
+        // Filter out common non-business emails
+        const businessEmail = emailMatches.find(email =>
+          !email.includes('gmail.com') &&
+          !email.includes('yahoo.com') &&
+          !email.includes('hotmail.com') &&
+          !email.includes('google.com')
+        );
+        if (businessEmail) {
+          business.email = businessEmail;
+        }
+      }
+    }
+
+  } catch (error) {
+    console.error('Error extracting selected business:', error);
   }
 
   return business;
