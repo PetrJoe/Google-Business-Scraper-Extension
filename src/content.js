@@ -996,91 +996,204 @@ async function navigateToLinkedInBusinessProfile(basicBusiness) {
   }
 }
 
-// Extract detailed info from currently selected Maps business
-async function extractSelectedMapsBusinessDetails() {
+// Extract detailed business information from Google Maps business profile
+async function extractDetailedMapsBusinessInfo() {
   const business = {};
 
   try {
     // Wait for business details to load
-    await waitForElement('[role="main"] h1', 3000);
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
-    // Business name
-    const nameElement = document.querySelector('[role="main"] h1');
-    if (nameElement) {
-      business.name = cleanText(nameElement.textContent);
-    }
+    // Business name - try multiple selectors
+    const nameSelectors = [
+      'h1[data-attrid="title"]',
+      '[role="main"] h1',
+      'h1.x3AX1-LfntMc-header-title-title',
+      'div[data-attrid="title"] h1',
+      '.x3AX1-LfntMc-header-title-title'
+    ];
 
-    // Rating and reviews
-    const ratingElement = document.querySelector('[role="img"][aria-label*="star"]');
-    if (ratingElement) {
-      business.rating = extractRating(ratingElement.ariaLabel);
-      business.reviewCount = extractReviewCount(ratingElement.ariaLabel);
-    }
-
-    // Category
-    const categoryElement = document.querySelector('[data-value="category"]') ||
-                           document.querySelector('button[data-value="category"]');
-    if (categoryElement) {
-      business.category = cleanText(categoryElement.textContent);
-    }
-
-    // Address
-    const addressElement = document.querySelector('[data-item-id="address"]') ||
-                          document.querySelector('button[data-item-id="address"]');
-    if (addressElement) {
-      business.address = cleanText(addressElement.textContent);
-    }
-
-    // Phone
-    const phoneElement = document.querySelector('[data-item-id*="phone"]') ||
-                        document.querySelector('button[data-item-id*="phone"]');
-    if (phoneElement) {
-      business.phone = extractPhone(phoneElement.textContent);
-    }
-
-    // Website
-    const websiteElement = document.querySelector('[data-item-id="authority"]') ||
-                          document.querySelector('a[data-item-id="authority"]');
-    if (websiteElement) {
-      business.website = websiteElement.href || websiteElement.textContent;
-    }
-
-    // Hours
-    const hoursElement = document.querySelector('[data-item-id="oh"]');
-    if (hoursElement) {
-      business.hours = cleanText(hoursElement.textContent);
-    }
-
-    // Email (search in about section or reviews)
-    const aboutSection = document.querySelector('[data-section-id="ib"], [data-section-id="ad"]');
-    if (aboutSection) {
-      const emailMatch = aboutSection.textContent.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-      if (emailMatch) {
-        business.email = emailMatch[0];
+    for (const selector of nameSelectors) {
+      const nameElement = document.querySelector(selector);
+      if (nameElement && nameElement.textContent.trim()) {
+        business.name = cleanText(nameElement.textContent);
+        break;
       }
     }
 
-    // Look for email in reviews or other sections
-    if (!business.email) {
-      const allText = document.body.textContent;
-      const emailMatches = allText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g);
-      if (emailMatches && emailMatches.length > 0) {
-        // Filter out common non-business emails
-        const businessEmail = emailMatches.find(email =>
-          !email.includes('gmail.com') &&
-          !email.includes('yahoo.com') &&
-          !email.includes('hotmail.com') &&
-          !email.includes('google.com')
-        );
-        if (businessEmail) {
-          business.email = businessEmail;
+    // If still no name, try aria-labels
+    if (!business.name) {
+      const ariaElement = document.querySelector('[aria-label*="Reviews for"], [aria-label*="stars"]');
+      if (ariaElement && ariaElement.ariaLabel) {
+        const match = ariaElement.ariaLabel.match(/Reviews for (.+?),|(.+?) \d+\.\d+ stars/);
+        if (match) {
+          business.name = match[1] || match[2];
         }
       }
     }
 
+    // Rating and reviews
+    const ratingSelectors = [
+      '[role="img"][aria-label*="star"]',
+      '.ceNzKf[aria-label*="stars"]',
+      '[data-value="rating"]'
+    ];
+
+    for (const selector of ratingSelectors) {
+      const ratingElement = document.querySelector(selector);
+      if (ratingElement) {
+        const ariaLabel = ratingElement.ariaLabel || ratingElement.textContent;
+        business.rating = extractRating(ariaLabel);
+        business.reviewCount = extractReviewCount(ariaLabel);
+        break;
+      }
+    }
+
+    // Category/Business type
+    const categorySelectors = [
+      'button[data-value="category"]',
+      '[data-attrid="category"]',
+      '.DkEaL'
+    ];
+
+    for (const selector of categorySelectors) {
+      const categoryElement = document.querySelector(selector);
+      if (categoryElement && categoryElement.textContent.trim()) {
+        business.category = cleanText(categoryElement.textContent);
+        break;
+      }
+    }
+
+    // Address
+    const addressSelectors = [
+      'button[data-item-id="address"]',
+      '[data-attrid="address"]',
+      '.Io6YTe.fontBodyMedium',
+      'div[data-attrid="address"] span'
+    ];
+
+    for (const selector of addressSelectors) {
+      const addressElement = document.querySelector(selector);
+      if (addressElement && addressElement.textContent.trim()) {
+        business.address = cleanText(addressElement.textContent);
+        break;
+      }
+    }
+
+    // Phone number
+    const phoneSelectors = [
+      'button[data-item-id*="phone"]',
+      '[data-attrid="phone"]',
+      'a[href^="tel:"]',
+      'button[aria-label*="phone" i]'
+    ];
+
+    for (const selector of phoneSelectors) {
+      const phoneElement = document.querySelector(selector);
+      if (phoneElement) {
+        const phoneText = phoneElement.textContent || phoneElement.href || phoneElement.ariaLabel;
+        const extractedPhone = extractPhone(phoneText);
+        if (extractedPhone) {
+          business.phone = extractedPhone;
+          break;
+        }
+      }
+    }
+
+    // Website
+    const websiteSelectors = [
+      'a[data-item-id="authority"]',
+      '[data-attrid="website"] a',
+      'a[aria-label*="website" i]',
+      '.CsEnBe a[href^="http"]'
+    ];
+
+    for (const selector of websiteSelectors) {
+      const websiteElement = document.querySelector(selector);
+      if (websiteElement && websiteElement.href && !websiteElement.href.includes('google.com')) {
+        business.website = websiteElement.href;
+        break;
+      }
+    }
+
+    // Business hours
+    const hoursSelectors = [
+      'button[data-item-id="oh"]',
+      '[data-attrid="hours"]',
+      '.OqCZI'
+    ];
+
+    for (const selector of hoursSelectors) {
+      const hoursElement = document.querySelector(selector);
+      if (hoursElement && hoursElement.textContent.trim()) {
+        business.hours = cleanText(hoursElement.textContent);
+        break;
+      }
+    }
+
+    // Email extraction - comprehensive search
+    const emailSources = [
+      // About section
+      '[data-section-id="ib"] *',
+      '[data-section-id="ad"] *',
+      // Reviews and descriptions
+      '.MyEned',
+      '.wiI7pd',
+      // Any visible text content
+      '.fontBodyMedium'
+    ];
+
+    for (const source of emailSources) {
+      const elements = document.querySelectorAll(source);
+      for (const element of elements) {
+        const text = element.textContent || '';
+        const emailMatch = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+        if (emailMatch) {
+          const email = emailMatch[0];
+          // Prefer business emails over personal ones
+          if (!email.includes('gmail.com') && !email.includes('yahoo.com') &&
+              !email.includes('hotmail.com') && !email.includes('outlook.com')) {
+            business.email = email;
+            break;
+          } else if (!business.email) {
+            business.email = email; // Fallback to any email
+          }
+        }
+      }
+      if (business.email) break;
+    }
+
+    // Additional business information
+    const additionalSelectors = [
+      '[data-attrid="price_range"]',
+      '[data-attrid="service_options"]',
+      '.RcCsl'
+    ];
+
+    for (const selector of additionalSelectors) {
+      const element = document.querySelector(selector);
+      if (element && element.textContent.trim()) {
+        if (!business.additionalInfo) business.additionalInfo = [];
+        business.additionalInfo.push(cleanText(element.textContent));
+      }
+    }
+
+    console.log('Extracted business data:', {
+      name: business.name,
+      phone: business.phone,
+      email: business.email,
+      website: business.website,
+      address: business.address
+    });
+
   } catch (error) {
-    console.error('Error extracting selected business:', error);
+    console.error('Error extracting detailed Maps business info:', error);
   }
 
   return business;
+}
+
+// Extract detailed info from currently selected Maps business (legacy function)
+async function extractSelectedMapsBusinessDetails() {
+  return await extractDetailedMapsBusinessInfo();
 }
