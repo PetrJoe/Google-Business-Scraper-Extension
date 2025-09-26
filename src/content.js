@@ -17,18 +17,54 @@ async function startScrapingProcess(config) {
   try {
     let businesses = [];
     const currentUrl = window.location.href;
+    const platform = config.platform || detectPlatform(currentUrl);
 
-    if (currentUrl.includes('google.com/search')) {
-      businesses = await scrapeGoogleSearch();
-    } else if (currentUrl.includes('google.com/maps') || currentUrl.includes('maps.google.com')) {
-      businesses = await scrapeGoogleMaps();
+    // Wait for page to load
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    switch (platform) {
+      case 'Google Search':
+        if (currentUrl.includes('google.com/search')) {
+          businesses = await scrapeGoogleSearch();
+        }
+        break;
+      case 'Google Maps':
+        if (currentUrl.includes('google.com/maps') || currentUrl.includes('maps.google.com')) {
+          businesses = await scrapeGoogleMaps();
+        }
+        break;
+      case 'Facebook':
+        if (currentUrl.includes('facebook.com')) {
+          businesses = await scrapeFacebook();
+        }
+        break;
+      case 'LinkedIn':
+        if (currentUrl.includes('linkedin.com')) {
+          businesses = await scrapeLinkedIn();
+        }
+        break;
+      default:
+        // Fallback detection
+        if (currentUrl.includes('google.com/search')) {
+          businesses = await scrapeGoogleSearch();
+        } else if (currentUrl.includes('google.com/maps') || currentUrl.includes('maps.google.com')) {
+          businesses = await scrapeGoogleMaps();
+        } else if (currentUrl.includes('facebook.com')) {
+          businesses = await scrapeFacebook();
+        } else if (currentUrl.includes('linkedin.com')) {
+          businesses = await scrapeLinkedIn();
+        }
     }
 
-    console.log(`Found ${businesses.length} businesses`);
+    console.log(`Found ${businesses.length} businesses from ${platform}`);
 
     // Send scraped data to background script
     let savedCount = 0;
     for (const business of businesses) {
+      // Add platform info to business data
+      business.source = platform;
+      business.sourceUrl = currentUrl;
+
       const result = await sendToBackground('saveBusiness', business);
       if (result && result.success && !result.duplicate) {
         savedCount++;
@@ -39,12 +75,13 @@ async function startScrapingProcess(config) {
     window.postMessage({
       type: 'SCRAPING_COMPLETE',
       count: savedCount,
-      total: businesses.length
+      total: businesses.length,
+      platform: platform
     }, '*');
 
     // Show subtle notification (don't focus the page)
     if (businesses.length > 0) {
-      console.log(`Background scraping completed: ${savedCount} new businesses saved`);
+      console.log(`Background scraping completed: ${savedCount} new businesses saved from ${platform}`);
     }
 
   } catch (error) {
@@ -53,9 +90,19 @@ async function startScrapingProcess(config) {
     window.postMessage({
       type: 'SCRAPING_COMPLETE',
       count: 0,
-      error: error.message
+      error: error.message,
+      platform: config.platform || 'unknown'
     }, '*');
   }
+}
+
+// Detect platform from URL
+function detectPlatform(url) {
+  if (url.includes('google.com/search')) return 'Google Search';
+  if (url.includes('google.com/maps') || url.includes('maps.google.com')) return 'Google Maps';
+  if (url.includes('facebook.com')) return 'Facebook';
+  if (url.includes('linkedin.com')) return 'LinkedIn';
+  return 'Unknown';
 }
 
 // Scrape businesses from Google Search results
@@ -434,3 +481,210 @@ observer.observe(document.body, { childList: true, subtree: true });
 
 // Initial detection
 autoDetectBusinessListings();
+
+// Scrape businesses from Facebook pages search
+async function scrapeFacebook() {
+  const businesses = [];
+
+  try {
+    // Wait for Facebook content to load
+    await waitForElement('[role="feed"], [data-pagelet="Search"]', 5000);
+
+    // Look for page results
+    const pageElements = document.querySelectorAll('[data-pagelet*="SearchResult"], [role="article"]');
+
+    for (const element of pageElements) {
+      try {
+        const business = await extractBusinessFromFacebook(element);
+        if (business && business.name) {
+          businesses.push(business);
+        }
+      } catch (error) {
+        console.error('Error extracting Facebook business:', error);
+      }
+    }
+
+    // Also try alternative selectors
+    const linkElements = document.querySelectorAll('a[href*="/pages/"]');
+    for (const link of linkElements) {
+      try {
+        const business = await extractFacebookPageFromLink(link);
+        if (business && business.name) {
+          businesses.push(business);
+        }
+      } catch (error) {
+        console.error('Error extracting Facebook page from link:', error);
+      }
+    }
+
+  } catch (error) {
+    console.error('Error scraping Facebook:', error);
+  }
+
+  return businesses;
+}
+
+// Extract business data from Facebook element
+async function extractBusinessFromFacebook(element) {
+  const business = {};
+
+  try {
+    // Look for page name/title
+    const nameElement = element.querySelector('h3, h4, strong, [role="heading"]') ||
+                       element.querySelector('span[dir="auto"]');
+    if (nameElement) {
+      const nameText = cleanText(nameElement.textContent);
+      if (nameText && nameText.length > 2 && nameText.length < 100) {
+        business.name = nameText;
+      }
+    }
+
+    // Look for links to pages
+    const linkElement = element.querySelector('a[href*="/pages/"], a[href*="facebook.com/"]');
+    if (linkElement) {
+      business.website = linkElement.href;
+
+      // Extract page name from URL if we don't have one
+      if (!business.name) {
+        const urlMatch = linkElement.href.match(/\/pages\/([^\/]+)/);
+        if (urlMatch) {
+          business.name = decodeURIComponent(urlMatch[1]).replace(/[-_]/g, ' ');
+        }
+      }
+    }
+
+    // Look for category/description
+    const categoryElement = element.querySelector('[data-testid*="subtitle"], .x1i10hfl');
+    if (categoryElement) {
+      const categoryText = cleanText(categoryElement.textContent);
+      if (categoryText && categoryText.length < 200) {
+        business.category = categoryText;
+      }
+    }
+
+    // Look for location info
+    const locationElement = element.querySelector('[aria-label*="location"], [title*="location"]');
+    if (locationElement) {
+      business.address = cleanText(locationElement.textContent || locationElement.title);
+    }
+
+  } catch (error) {
+    console.error('Error extracting from Facebook element:', error);
+  }
+
+  return business;
+}
+
+// Extract Facebook page info from link
+async function extractFacebookPageFromLink(link) {
+  const business = {};
+
+  try {
+    const href = link.href;
+    if (!href.includes('facebook.com')) return null;
+
+    // Extract business name from link text
+    const linkText = cleanText(link.textContent);
+    if (linkText && linkText.length > 2 && linkText.length < 100) {
+      business.name = linkText;
+    }
+
+    business.website = href;
+
+    // Try to get additional info from nearby elements
+    const parent = link.closest('[role="article"], div[data-testid]');
+    if (parent) {
+      const descElement = parent.querySelector('[data-testid*="subtitle"]');
+      if (descElement) {
+        business.category = cleanText(descElement.textContent);
+      }
+    }
+
+  } catch (error) {
+    console.error('Error extracting Facebook page from link:', error);
+  }
+
+  return business;
+}
+
+// Scrape businesses from LinkedIn company search
+async function scrapeLinkedIn() {
+  const businesses = [];
+
+  try {
+    // Wait for LinkedIn search results to load
+    await waitForElement('.search-results-container, .search-results__list', 5000);
+
+    // Look for company results
+    const companyElements = document.querySelectorAll('.search-result, .search-result__info, .entity-result');
+
+    for (const element of companyElements) {
+      try {
+        const business = await extractBusinessFromLinkedIn(element);
+        if (business && business.name) {
+          businesses.push(business);
+        }
+      } catch (error) {
+        console.error('Error extracting LinkedIn business:', error);
+      }
+    }
+
+  } catch (error) {
+    console.error('Error scraping LinkedIn:', error);
+  }
+
+  return businesses;
+}
+
+// Extract business data from LinkedIn element
+async function extractBusinessFromLinkedIn(element) {
+  const business = {};
+
+  try {
+    // Look for company name
+    const nameElement = element.querySelector('.entity-result__title-text a, .search-result__title a, h3 a') ||
+                       element.querySelector('.entity-result__title-text, .search-result__title, h3');
+    if (nameElement) {
+      business.name = cleanText(nameElement.textContent);
+    }
+
+    // Look for company URL
+    const linkElement = element.querySelector('a[href*="/company/"]');
+    if (linkElement) {
+      business.website = linkElement.href;
+    }
+
+    // Look for company description/industry
+    const descElement = element.querySelector('.entity-result__summary, .search-result__snippets') ||
+                       element.querySelector('.entity-result__primary-subtitle, .subline-level-1');
+    if (descElement) {
+      const descText = cleanText(descElement.textContent);
+      if (descText && descText.length < 500) {
+        business.category = descText;
+      }
+    }
+
+    // Look for location
+    const locationElement = element.querySelector('[data-test-id="location"], .entity-result__secondary-subtitle');
+    if (locationElement) {
+      const locationText = cleanText(locationElement.textContent);
+      if (locationText && !locationText.includes('followers')) {
+        business.address = locationText;
+      }
+    }
+
+    // Look for employee count (can indicate business size)
+    const employeeElement = element.querySelector('.entity-result__employees, [data-test-id="employees"]');
+    if (employeeElement) {
+      const employeeText = cleanText(employeeElement.textContent);
+      if (employeeText.includes('employee')) {
+        business.notes = employeeText;
+      }
+    }
+
+  } catch (error) {
+    console.error('Error extracting from LinkedIn element:', error);
+  }
+
+  return business;
+}

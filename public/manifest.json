@@ -12,6 +12,9 @@
   "host_permissions": [
     "https://www.google.com/*",
     "https://maps.google.com/*",
+    "https://www.facebook.com/*",
+    "https://www.linkedin.com/*",
+    "https://www.instagram.com/*",
     "https://nominatim.openstreetmap.org/*",
     "https://overpass-api.de/*"
   ],
@@ -23,7 +26,10 @@
       "matches": [
         "https://www.google.com/search*",
         "https://www.google.com/maps*",
-        "https://maps.google.com/*"
+        "https://maps.google.com/*",
+        "https://www.facebook.com/*",
+        "https://www.linkedin.com/*",
+        "https://www.instagram.com/*"
       ],
       "js": ["content.js"],
       "run_at": "document_end"

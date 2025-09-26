@@ -51,63 +51,132 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-// Handle scraping initiation
+// Handle automated searching and scraping
 async function handleStartScraping(data, sendResponse) {
   try {
-    // Get all Google search/maps tabs
-    const tabs = await chrome.tabs.query({});
-    const googleTabs = tabs.filter(tab =>
-      tab.url && (
-        tab.url.includes('google.com/search') ||
-        tab.url.includes('google.com/maps') ||
-        tab.url.includes('maps.google.com')
-      )
-    );
+    const { keyword, location, platforms } = data;
 
-    if (googleTabs.length === 0) {
-      sendResponse({ success: false, error: 'No Google Search or Maps tabs found. Please open Google Search or Maps in a tab first.' });
+    if (!keyword) {
+      sendResponse({ success: false, error: 'Keyword is required' });
+      return;
+    }
+
+    const searchUrls = generateSearchUrls(keyword, location, platforms);
+
+    if (searchUrls.length === 0) {
+      sendResponse({ success: false, error: 'Please select at least one search platform' });
       return;
     }
 
     let totalScraped = 0;
     let errors = [];
+    const createdTabs = [];
 
-    // Scrape from all Google tabs in background
-    for (const tab of googleTabs) {
+    // Create tabs and perform searches
+    for (const urlData of searchUrls) {
       try {
-        // Inject content script to start scraping without switching focus
-        const results = await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: initiateScraping,
-          args: [data]
+        console.log(`Creating tab for ${urlData.platform}: ${urlData.url}`);
+
+        // Create new tab (inactive so it doesn't interrupt user)
+        const tab = await chrome.tabs.create({
+          url: urlData.url,
+          active: false // Don't switch focus to new tab
         });
 
-        if (results && results[0] && results[0].result) {
-          totalScraped += results[0].result.count || 0;
-        }
+        createdTabs.push({ ...tab, platform: urlData.platform });
+
+        // Wait a bit for page to load before starting scraping
+        setTimeout(async () => {
+          try {
+            const results = await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              func: initiateScraping,
+              args: [{ ...data, platform: urlData.platform }]
+            });
+
+            if (results && results[0] && results[0].result) {
+              totalScraped += results[0].result.count || 0;
+            }
+          } catch (error) {
+            console.error(`Error scraping ${urlData.platform} tab:`, error);
+            errors.push(`${urlData.platform}: ${error.message}`);
+          }
+        }, urlData.delay || 2000);
+
       } catch (error) {
-        console.error(`Error scraping tab ${tab.id}:`, error);
-        errors.push(`Tab ${tab.id}: ${error.message}`);
+        console.error(`Error creating tab for ${urlData.platform}:`, error);
+        errors.push(`${urlData.platform}: ${error.message}`);
       }
     }
 
-    if (totalScraped > 0) {
-      sendResponse({
-        success: true,
-        message: `Background scraping completed! Found ${totalScraped} businesses from ${googleTabs.length} tab(s).`,
-        scraped: totalScraped,
-        tabsProcessed: googleTabs.length
-      });
-    } else {
-      sendResponse({
-        success: false,
-        error: `No businesses found. ${errors.length > 0 ? 'Errors: ' + errors.join(', ') : 'Try refreshing the Google Search/Maps pages.'}`
-      });
-    }
+    // Send immediate response about tab creation
+    sendResponse({
+      success: true,
+      message: `Started automated search on ${searchUrls.length} platform(s). Tabs created in background.`,
+      tabsCreated: searchUrls.length,
+      platforms: searchUrls.map(u => u.platform)
+    });
+
+    // Schedule cleanup and final report after scraping completes
+    setTimeout(async () => {
+      // Optionally close the created tabs after scraping
+      // for (const tab of createdTabs) {
+      //   try {
+      //     await chrome.tabs.remove(tab.id);
+      //   } catch (error) {
+      //     console.log(`Could not close tab ${tab.id}`);
+      //   }
+      // }
+
+      console.log(`Automated scraping completed: ${totalScraped} businesses found`);
+    }, 30000); // Wait 30 seconds for all scraping to complete
+
   } catch (error) {
-    console.error('Error starting scraping:', error);
+    console.error('Error in automated searching:', error);
     sendResponse({ success: false, error: error.message });
   }
+}
+
+// Generate search URLs for different platforms
+function generateSearchUrls(keyword, location, platforms) {
+  const urls = [];
+  const encodedKeyword = encodeURIComponent(keyword);
+  const searchQuery = location ? `${keyword} ${location}` : keyword;
+  const encodedQuery = encodeURIComponent(searchQuery);
+
+  if (platforms.google) {
+    urls.push({
+      platform: 'Google Search',
+      url: `https://www.google.com/search?q=${encodedQuery}`,
+      delay: 2000
+    });
+  }
+
+  if (platforms.maps) {
+    urls.push({
+      platform: 'Google Maps',
+      url: `https://www.google.com/maps/search/${encodedQuery}`,
+      delay: 3000
+    });
+  }
+
+  if (platforms.facebook) {
+    urls.push({
+      platform: 'Facebook',
+      url: `https://www.facebook.com/search/pages/?q=${encodedKeyword}`,
+      delay: 4000
+    });
+  }
+
+  if (platforms.linkedin) {
+    urls.push({
+      platform: 'LinkedIn',
+      url: `https://www.linkedin.com/search/results/companies/?keywords=${encodedKeyword}`,
+      delay: 5000
+    });
+  }
+
+  return urls;
 }
 
 // Function to be injected into the page
