@@ -71,7 +71,7 @@ export function useBusinessData() {
   // Export data
   const exportData = useCallback(async (format) => {
     try {
-      const response = await sendMessage('exportData', format)
+      const response = await sendMessage('exportData', { format })
 
       // Handle client-side XLSX processing
       if (response.requiresClientProcessing && format === 'xlsx') {

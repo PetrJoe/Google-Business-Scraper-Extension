@@ -39,7 +39,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
 
     case 'exportData':
-      handleExportData(request.format, sendResponse);
+      handleExportData(request.data.format, sendResponse);
       return true;
 
     case 'fetchOSMData':
@@ -75,7 +75,7 @@ async function handleStartScraping(data, sendResponse) {
     // Create tabs and perform searches
     for (const urlData of searchUrls) {
       try {
-        console.log(`Creating tab for ${urlData.platform}: ${urlData.url}`);
+        console.log(`Creating background tab for ${urlData.platform}: ${urlData.url}`);
 
         // Create new tab (inactive so it doesn't interrupt user)
         const tab = await chrome.tabs.create({
@@ -97,9 +97,27 @@ async function handleStartScraping(data, sendResponse) {
             if (results && results[0] && results[0].result) {
               totalScraped += results[0].result.count || 0;
             }
+
+            // Close the tab after scraping is complete
+            setTimeout(async () => {
+              try {
+                await chrome.tabs.remove(tab.id);
+                console.log(`Closed background tab for ${urlData.platform}`);
+              } catch (closeError) {
+                console.error(`Error closing tab for ${urlData.platform}:`, closeError);
+              }
+            }, 3000); // Wait 3 seconds after scraping to ensure completion
           } catch (error) {
             console.error(`Error scraping ${urlData.platform} tab:`, error);
             errors.push(`${urlData.platform}: ${error.message}`);
+
+            // Close tab even if scraping failed
+            try {
+              await chrome.tabs.remove(tab.id);
+              console.log(`Closed failed tab for ${urlData.platform}`);
+            } catch (closeError) {
+              console.error(`Error closing failed tab:`, closeError);
+            }
           }
         }, urlData.delay || 2000);
 
@@ -112,23 +130,14 @@ async function handleStartScraping(data, sendResponse) {
     // Send immediate response about tab creation
     sendResponse({
       success: true,
-      message: `Started automated search on ${searchUrls.length} platform(s). Tabs created in background.`,
+      message: `Started automated search on ${searchUrls.length} platform(s). Background tabs will close automatically after scraping.`,
       tabsCreated: searchUrls.length,
       platforms: searchUrls.map(u => u.platform)
     });
 
-    // Schedule cleanup and final report after scraping completes
+    // Schedule final report after scraping completes
     setTimeout(async () => {
-      // Optionally close the created tabs after scraping
-      // for (const tab of createdTabs) {
-      //   try {
-      //     await chrome.tabs.remove(tab.id);
-      //   } catch (error) {
-      //     console.log(`Could not close tab ${tab.id}`);
-      //   }
-      // }
-
-      console.log(`Automated scraping completed: ${totalScraped} businesses found`);
+      console.log(`Automated background scraping completed: ${totalScraped} businesses found`);
     }, 30000); // Wait 30 seconds for all scraping to complete
 
   } catch (error) {
@@ -310,12 +319,11 @@ async function handleExportData(format, sendResponse) {
         return;
     }
 
-    // Create download
-    const blob = new Blob([exportData], { type: mimeType });
-    const url = URL.createObjectURL(blob);
+    // Create data URL for download (service worker compatible)
+    const dataUrl = `data:${mimeType};charset=utf-8,${encodeURIComponent(exportData)}`;
 
     await chrome.downloads.download({
-      url: url,
+      url: dataUrl,
       filename: filename,
       saveAs: true
     });
