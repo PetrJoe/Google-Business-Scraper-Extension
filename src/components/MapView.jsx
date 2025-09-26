@@ -132,10 +132,10 @@ function MapView({ businesses }) {
   // Check if Leaflet is available
   if (typeof L === 'undefined') {
     return (
-      <div className="flex-1 flex items-center justify-center p-4">
-        <div className="text-center">
-          <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full spinner mx-auto mb-2"></div>
-          <p className="text-gray-600">Loading map...</p>
+      <div className="loading-state">
+        <div className="state-content">
+          <div className="spinner"></div>
+          <p className="state-description">Loading map...</p>
         </div>
       </div>
     )
@@ -147,20 +147,20 @@ function MapView({ businesses }) {
   )
 
   return (
-    <div className="flex-1 relative">
-      <div ref={mapRef} className="w-full h-full" />
+    <div className="map-view">
+      <div ref={mapRef} className="map-container" />
 
       {businesses.length > 0 && businessesWithCoords.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-90">
-          <div className="text-center p-4">
-            <div className="w-12 h-12 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-3">
-              <svg className="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="map-overlay">
+          <div className="map-overlay-content">
+            <div className="state-icon" style={{ backgroundColor: '#fffbeb' }}>
+              <svg style={{ width: '24px', height: '24px', color: '#d97706' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
             </div>
-            <h3 className="text-sm font-medium text-gray-900 mb-1">No Location Data</h3>
-            <p className="text-sm text-gray-600">
+            <h3 className="state-title">No Location Data</h3>
+            <p className="state-description">
               Businesses need to be enriched with OpenStreetMap data to show on the map.
             </p>
           </div>
@@ -168,15 +168,15 @@ function MapView({ businesses }) {
       )}
 
       {businesses.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center bg-white">
-          <div className="text-center p-4">
-            <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
-              <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="map-overlay" style={{ backgroundColor: 'white' }}>
+          <div className="map-overlay-content">
+            <div className="state-icon empty">
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
               </svg>
             </div>
-            <h3 className="text-sm font-medium text-gray-900 mb-1">No Businesses to Show</h3>
-            <p className="text-sm text-gray-600">
+            <h3 className="state-title">No Businesses to Show</h3>
+            <p className="state-description">
               Start scraping businesses to see them on the map.
             </p>
           </div>
