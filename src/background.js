@@ -54,29 +54,56 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // Handle scraping initiation
 async function handleStartScraping(data, sendResponse) {
   try {
-    // Get active tab
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    // Get all Google search/maps tabs
+    const tabs = await chrome.tabs.query({});
+    const googleTabs = tabs.filter(tab =>
+      tab.url && (
+        tab.url.includes('google.com/search') ||
+        tab.url.includes('google.com/maps') ||
+        tab.url.includes('maps.google.com')
+      )
+    );
 
-    if (!tab) {
-      sendResponse({ success: false, error: 'No active tab found' });
+    if (googleTabs.length === 0) {
+      sendResponse({ success: false, error: 'No Google Search or Maps tabs found. Please open Google Search or Maps in a tab first.' });
       return;
     }
 
-    // Check if tab is on Google search or maps
-    const url = tab.url;
-    if (!url.includes('google.com/search') && !url.includes('google.com/maps') && !url.includes('maps.google.com')) {
-      sendResponse({ success: false, error: 'Please navigate to Google Search or Google Maps first' });
-      return;
+    let totalScraped = 0;
+    let errors = [];
+
+    // Scrape from all Google tabs in background
+    for (const tab of googleTabs) {
+      try {
+        // Inject content script to start scraping without switching focus
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: initiateScraping,
+          args: [data]
+        });
+
+        if (results && results[0] && results[0].result) {
+          totalScraped += results[0].result.count || 0;
+        }
+      } catch (error) {
+        console.error(`Error scraping tab ${tab.id}:`, error);
+        errors.push(`Tab ${tab.id}: ${error.message}`);
+      }
     }
 
-    // Inject content script to start scraping
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: initiateScraping,
-      args: [data]
-    });
-
-    sendResponse({ success: true, message: 'Scraping initiated' });
+    if (totalScraped > 0) {
+      sendResponse({
+        success: true,
+        message: `Background scraping completed! Found ${totalScraped} businesses from ${googleTabs.length} tab(s).`,
+        scraped: totalScraped,
+        tabsProcessed: googleTabs.length
+      });
+    } else {
+      sendResponse({
+        success: false,
+        error: `No businesses found. ${errors.length > 0 ? 'Errors: ' + errors.join(', ') : 'Try refreshing the Google Search/Maps pages.'}`
+      });
+    }
   } catch (error) {
     console.error('Error starting scraping:', error);
     sendResponse({ success: false, error: error.message });
@@ -85,11 +112,33 @@ async function handleStartScraping(data, sendResponse) {
 
 // Function to be injected into the page
 function initiateScraping(data) {
-  // This function runs in the context of the web page
-  window.postMessage({
-    type: 'START_SCRAPING',
-    data: data
-  }, '*');
+  return new Promise((resolve) => {
+    // This function runs in the context of the web page
+    let scrapedCount = 0;
+
+    // Listen for scraping results
+    const handleMessage = (event) => {
+      if (event.data.type === 'SCRAPING_COMPLETE') {
+        scrapedCount = event.data.count || 0;
+        window.removeEventListener('message', handleMessage);
+        resolve({ count: scrapedCount });
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+
+    // Start scraping
+    window.postMessage({
+      type: 'START_SCRAPING',
+      data: data
+    }, '*');
+
+    // Timeout after 30 seconds
+    setTimeout(() => {
+      window.removeEventListener('message', handleMessage);
+      resolve({ count: scrapedCount });
+    }, 30000);
+  });
 }
 
 // Handle saving business data

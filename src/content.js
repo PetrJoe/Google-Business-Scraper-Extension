@@ -12,7 +12,7 @@ window.addEventListener('message', (event) => {
 
 // Main scraping function
 async function startScrapingProcess(config) {
-  console.log('Starting scraping process with config:', config);
+  console.log('Starting background scraping process with config:', config);
 
   try {
     let businesses = [];
@@ -27,16 +27,34 @@ async function startScrapingProcess(config) {
     console.log(`Found ${businesses.length} businesses`);
 
     // Send scraped data to background script
+    let savedCount = 0;
     for (const business of businesses) {
-      await sendToBackground('saveBusiness', business);
+      const result = await sendToBackground('saveBusiness', business);
+      if (result && result.success && !result.duplicate) {
+        savedCount++;
+      }
     }
 
-    // Notify completion
-    showNotification(`Successfully scraped ${businesses.length} businesses`);
+    // Notify completion back to the injected script
+    window.postMessage({
+      type: 'SCRAPING_COMPLETE',
+      count: savedCount,
+      total: businesses.length
+    }, '*');
+
+    // Show subtle notification (don't focus the page)
+    if (businesses.length > 0) {
+      console.log(`Background scraping completed: ${savedCount} new businesses saved`);
+    }
 
   } catch (error) {
-    console.error('Scraping error:', error);
-    showNotification('Error during scraping: ' + error.message);
+    console.error('Background scraping error:', error);
+    // Send completion even on error
+    window.postMessage({
+      type: 'SCRAPING_COMPLETE',
+      count: 0,
+      error: error.message
+    }, '*');
   }
 }
 
